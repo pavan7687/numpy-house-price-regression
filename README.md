@@ -20,8 +20,8 @@ python scaffold.py
 - [x] **8.** apply_standardizer
 - [x] **9.** add_bias_column
 - [x] **10.** make_shuffled_indices
-- [ ] **11.** partition_indices
-- [ ] **12.** subset_xy
+- [x] **11.** partition_indices
+- [x] **12.** subset_xy
 - [ ] **13.** ols_fit
 - [ ] **14.** ols_predict
 - [ ] **15.** mean_absolute_error

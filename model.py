@@ -85,11 +85,25 @@ def make_shuffled_indices(n_samples, seed):
     rng.shuffle(arr)
     return arr
 
-# Step 11 - partition_indices (not yet solved)
-# TODO: implement
+# Step 11 - partition_indices
+import numpy as np
 
-# Step 12 - subset_xy (not yet solved)
-# TODO: implement
+def partition_indices(indices, train_ratio, val_ratio):
+    n = len(indices)
+
+    n_train = int(np.floor(n * train_ratio))
+    n_val = int(np.floor(n * val_ratio))
+
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:n_train + n_val]
+    test_idx = indices[n_train + n_val:]
+
+    return train_idx, val_idx, test_idx
+
+# Step 12 - subset_xy
+def subset_xy(X, y, indices):
+    # TODO: Select the rows of X and y at the given indices.
+    return X[indices],y[indices]
 
 # Step 13 - ols_fit (not yet solved)
 # TODO: implement
