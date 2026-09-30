@@ -251,32 +251,30 @@ import numpy as np
 
 def impute_nan_with_mean(X):
     X = np.asarray(X, dtype=float).copy()
-
     for j in range(X.shape[1]):
         mask = np.isnan(X[:, j])
-
-        if np.all(mask):
-            X[:, j] = 0.0
-        else:
-            mean = np.nanmean(X[:, j])
-            X[mask, j] = mean
-
+        if np.any(mask):
+            valid = X[~mask, j]
+            if len(valid) == 0:
+                mean_val = 0.0
+            else:
+                mean_val = np.mean(valid)
+            X[mask, j] = mean_val
     return X
 
 
-def compute_iqr_bounds(X, k=1.5):
+def compute_iqr_bounds(X, iqr_k=1.5):
+    X = np.asarray(X, dtype=float)
     q1 = np.percentile(X, 25, axis=0)
     q3 = np.percentile(X, 75, axis=0)
-
     iqr = q3 - q1
-
-    lower = q1 - k * iqr
-    upper = q3 + k * iqr
-
+    lower = q1 - iqr_k * iqr
+    upper = q3 + iqr_k * iqr
     return lower, upper
 
 
 def clip_columns(X, lower, upper):
+    X = np.asarray(X, dtype=float)
     return np.clip(X, lower, upper)
 
 
@@ -284,186 +282,127 @@ def clip_columns(X, lower, upper):
 # 2. FEATURE ENGINEERING
 # ============================================================
 
+def make_ratio_feature(numerator, denominator, eps=1e-8):
+    numerator = np.asarray(numerator, dtype=float)
+    denominator = np.asarray(denominator, dtype=float)
+    return numerator / (denominator + eps)
+
+
 def append_column(X, col):
+    X = np.asarray(X, dtype=float)
+    col = np.asarray(col, dtype=float)
     return np.column_stack((X, col))
 
 
 def one_hot_encode(labels):
     labels = np.asarray(labels)
-
-    categories = np.unique(labels)
-
-    result = np.zeros(
-        (len(labels), len(categories)),
-        dtype=float
-    )
-
+    unique_labels = np.sort(np.unique(labels))
+    result = np.zeros((len(labels), len(unique_labels)), dtype=float)
     for i, label in enumerate(labels):
-        j = np.searchsorted(categories, label)
+        j = np.where(unique_labels == label)[0][0]
         result[i, j] = 1.0
-
     return result
 
 
+def assemble_feature_matrix(X_num, ratio_num_idx, ratio_den_idx, cat_labels=None):
+    X_num = np.asarray(X_num, dtype=float)
+    numerator = X_num[:, ratio_num_idx]
+    denominator = X_num[:, ratio_den_idx]
+    ratio = make_ratio_feature(numerator, denominator)
+    X_extended = append_column(X_num, ratio)
+
+    if cat_labels is not None:
+        cat_block = one_hot_encode(cat_labels)
+        X_extended = np.column_stack((X_extended, cat_block))
+
+    return X_extended
+
+
+# ============================================================
+# 3. STANDARDIZATION
+# ============================================================
+
 def fit_standardizer(X):
+    X = np.asarray(X, dtype=float)
     mean = np.mean(X, axis=0)
     std = np.std(X, axis=0)
-
-    # Replace zero standard deviations with 1
-    std = np.where(std == 0, 1.0, std)
-
+    # Avoid division by zero
+    std = np.where(std == 0.0, 1.0, std)
     return mean, std
 
 
 def apply_standardizer(X, mean, std):
+    X = np.asarray(X, dtype=float)
     return (X - mean) / std
 
 
 def add_bias_column(X):
-    ones = np.ones(X.shape[0], dtype=float)
-
+    X = np.asarray(X, dtype=float)
+    n = X.shape[0]
+    ones = np.ones(n, dtype=float)
     return np.column_stack((ones, X))
 
 
-def make_ratio_feature(numerator, denominator, eps=1e-8):
-    return numerator / (denominator + eps)
-
-
-def assemble_feature_matrix(
-    X_num,
-    ratio_num_idx,
-    ratio_den_idx,
-    cat_labels=None
-):
-    numerator = X_num[:, ratio_num_idx]
-    denominator = X_num[:, ratio_den_idx]
-
-    ratio = make_ratio_feature(
-        numerator,
-        denominator
-    )
-
-    X_out = append_column(
-        X_num,
-        ratio
-    )
-
-    if cat_labels is not None:
-        cat_block = one_hot_encode(cat_labels)
-
-        X_out = np.column_stack(
-            (X_out, cat_block)
-        )
-
-    return X_out
-
-
 # ============================================================
-# 3. REPRODUCIBLE SPLITS
+# 4. REPRODUCIBLE SPLITS
 # ============================================================
 
 def make_shuffled_indices(n_samples, seed):
-    rng = np.random.default_rng(seed)
-
+    rng = np.random.RandomState(seed)
     indices = np.arange(n_samples)
-
     rng.shuffle(indices)
-
     return indices
 
 
 def partition_indices(indices, train_ratio, val_ratio):
     n = len(indices)
-
     train_n = int(np.floor(n * train_ratio))
     val_n = int(np.floor(n * val_ratio))
 
     train_idx = indices[:train_n]
-
-    val_idx = indices[
-        train_n:train_n + val_n
-    ]
-
-    test_idx = indices[
-        train_n + val_n:
-    ]
+    val_idx = indices[train_n : train_n + val_n]
+    test_idx = indices[train_n + val_n :]
 
     return train_idx, val_idx, test_idx
 
 
-def make_train_val_test(
-    X,
-    y,
-    train_ratio,
-    val_ratio,
-    seed
-):
-    indices = make_shuffled_indices(
-        len(X),
-        seed
-    )
-
-    train_idx, val_idx, test_idx = partition_indices(
-        indices,
-        train_ratio,
-        val_ratio
-    )
+def make_train_val_test(X, y, train_ratio, val_ratio, seed):
+    indices = make_shuffled_indices(len(X), seed)
+    train_idx, val_idx, test_idx = partition_indices(indices, train_ratio, val_ratio)
 
     return {
         "X_train": X[train_idx],
         "y_train": y[train_idx],
-
         "X_val": X[val_idx],
         "y_val": y[val_idx],
-
         "X_test": X[test_idx],
         "y_test": y[test_idx]
     }
 
 
 # ============================================================
-# 4. STANDARDIZATION + BIAS
+# 5. STANDARDIZE ALL SPLITS USING TRAINING STATISTICS
 # ============================================================
 
 def standardize_and_add_bias(splits):
-
     # Fit ONLY on training data
-    mean, std = fit_standardizer(
-        splits["X_train"]
-    )
+    mean, std = fit_standardizer(splits["X_train"])
 
-    # Use training statistics for every split
-    X_train = apply_standardizer(
-        splits["X_train"],
-        mean,
-        std
-    )
-
-    X_val = apply_standardizer(
-        splits["X_val"],
-        mean,
-        std
-    )
-
-    X_test = apply_standardizer(
-        splits["X_test"],
-        mean,
-        std
-    )
+    X_train_std = apply_standardizer(splits["X_train"], mean, std)
+    X_val_std = apply_standardizer(splits["X_val"], mean, std)
+    X_test_std = apply_standardizer(splits["X_test"], mean, std)
 
     # Add bias/intercept column
-    X_train = add_bias_column(X_train)
-    X_val = add_bias_column(X_val)
-    X_test = add_bias_column(X_test)
+    X_train_std = add_bias_column(X_train_std)
+    X_val_std = add_bias_column(X_val_std)
+    X_test_std = add_bias_column(X_test_std)
 
     std_splits = {
-        "X_train": X_train,
+        "X_train": X_train_std,
         "y_train": splits["y_train"],
-
-        "X_val": X_val,
+        "X_val": X_val_std,
         "y_val": splits["y_val"],
-
-        "X_test": X_test,
+        "X_test": X_test_std,
         "y_test": splits["y_test"]
     }
 
@@ -471,108 +410,70 @@ def standardize_and_add_bias(splits):
 
 
 # ============================================================
-# 5. ORDINARY LEAST SQUARES
+# 6. ORDINARY LEAST SQUARES
 # ============================================================
 
 def ols_fit(X, y):
-    # Use least-squares directly.
-    # This works even when X.T @ X is singular.
-    theta = np.linalg.lstsq(
-        X,
-        y,
-        rcond=None
-    )[0]
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
 
+    # Numerically stable solution
+    theta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
     return theta
 
 
 # ============================================================
-# 6. METRICS
+# 7. METRICS
 # ============================================================
 
 def mean_absolute_error(y_true, y_pred):
-    return float(
-        np.mean(
-            np.abs(y_true - y_pred)
-        )
-    )
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    return float(np.mean(np.abs(y_true - y_pred)))
 
 
 def root_mean_squared_error(y_true, y_pred):
-    return float(
-        np.sqrt(
-            np.mean(
-                (y_true - y_pred) ** 2
-            )
-        )
-    )
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
 def r_squared(y_true, y_pred):
-    ss_res = np.sum(
-        (y_true - y_pred) ** 2
-    )
-
-    ss_tot = np.sum(
-        (y_true - np.mean(y_true)) ** 2
-    )
-
-    # IMPORTANT:
-    # Assignment explicitly requires 0.0
-    # when SS_tot is zero.
-    if ss_tot == 0:
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    
+    if ss_tot == 0.0:
         return 0.0
 
-    return float(
-        1.0 - ss_res / ss_tot
-    )
+    return float(1.0 - (ss_res / ss_tot))
 
 
 def residual_summary(y_true, y_pred):
-    r = y_true - y_pred
-
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    residuals = y_true - y_pred
+    
     return {
-        "mean": float(
-            np.mean(r)
-        ),
-
-        "std": float(
-            np.std(r)
-        ),
-
-        "median_abs": float(
-            np.median(np.abs(r))
-        )
+        "mean": float(np.mean(residuals)),
+        "std": float(np.std(residuals)),
+        "median_abs": float(np.median(np.abs(residuals)))
     }
 
 
 def evaluate_predictions(y_true, y_pred):
-
     return {
-        "mae": mean_absolute_error(
-            y_true,
-            y_pred
-        ),
-
-        "rmse": root_mean_squared_error(
-            y_true,
-            y_pred
-        ),
-
-        "r2": r_squared(
-            y_true,
-            y_pred
-        ),
-
-        "residual_summary": residual_summary(
-            y_true,
-            y_pred
-        )
+        "mae": mean_absolute_error(y_true, y_pred),
+        "rmse": root_mean_squared_error(y_true, y_pred),
+        "r2": r_squared(y_true, y_pred),
+        "residual_summary": residual_summary(y_true, y_pred)
     }
 
 
 # ============================================================
-# 7. FINAL END-TO-END PIPELINE
+# 8. COMPLETE HOUSE PRICE PIPELINE
 # ============================================================
 
 def house_price_pipeline(
@@ -581,120 +482,64 @@ def house_price_pipeline(
     ratio_num_idx,
     ratio_den_idx,
     cat_labels=None,
-    seed=0
+    train_ratio=0.6,
+    val_ratio=0.2,
+    seed=0,
+    iqr_k=1.5
 ):
 
     # --------------------------------------------------------
-    # Step 1: Clean missing values
+    # Step 1: Convert inputs
     # --------------------------------------------------------
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
 
+    # --------------------------------------------------------
+    # Step 2: Handle NaN values (Cleaning)
+    # --------------------------------------------------------
     X = impute_nan_with_mean(X)
 
+    # --------------------------------------------------------
+    # Step 3: Compute IQR bounds & Clip outliers
+    # --------------------------------------------------------
+    lower, upper = compute_iqr_bounds(X, iqr_k)
+    X = clip_columns(X, lower, upper)
 
     # --------------------------------------------------------
-    # Step 2: Compute IQR bounds
+    # Step 4: Feature engineering (Assembly)
     # --------------------------------------------------------
-
-    lower, upper = compute_iqr_bounds(X)
-
-
-    # --------------------------------------------------------
-    # Step 3: Clip outliers
-    # --------------------------------------------------------
-
-    X = clip_columns(
-        X,
-        lower,
-        upper
-    )
-
-
-    # --------------------------------------------------------
-    # Step 4: Feature engineering
-    # --------------------------------------------------------
-
-    X = assemble_feature_matrix(
-        X,
-        ratio_num_idx,
-        ratio_den_idx,
-        cat_labels
-    )
-
+    X = assemble_feature_matrix(X, ratio_num_idx, ratio_den_idx, cat_labels)
 
     # --------------------------------------------------------
     # Step 5: Train / validation / test split
     # --------------------------------------------------------
-
-    splits = make_train_val_test(
-        X,
-        y,
-        0.6,
-        0.2,
-        seed
-    )
-
+    splits = make_train_val_test(X, y, train_ratio, val_ratio, seed)
 
     # --------------------------------------------------------
-    # Step 6: Standardize + bias
+    # Step 6: Standardize (Train-only standardization with bias)
     # --------------------------------------------------------
-
-    std_splits, mean, std = standardize_and_add_bias(
-        splits
-    )
-
+    std_splits, mean, std = standardize_and_add_bias(splits)
 
     # --------------------------------------------------------
-    # Step 7: OLS
+    # Step 7: Fit OLS
     # --------------------------------------------------------
-
-    theta = ols_fit(
-        std_splits["X_train"],
-        std_splits["y_train"]
-    )
-
+    theta = ols_fit(std_splits["X_train"], std_splits["y_train"])
 
     # --------------------------------------------------------
-    # Step 8: Validation prediction
+    # Step 8: Predictions
     # --------------------------------------------------------
-
-    y_val_pred = (
-        std_splits["X_val"] @ theta
-    )
-
+    y_test_pred = std_splits["X_test"] @ theta
+    y_val_pred = std_splits["X_val"] @ theta
 
     # --------------------------------------------------------
-    # Step 9: Test prediction
+    # Step 9: Validation & Test metrics
     # --------------------------------------------------------
-
-    y_test_pred = (
-        std_splits["X_test"] @ theta
-    )
-
+    test_metrics = evaluate_predictions(std_splits["y_test"], y_test_pred)
+    val_metrics = evaluate_predictions(std_splits["y_val"], y_val_pred)
 
     # --------------------------------------------------------
-    # Step 10: Test metrics
+    # Step 10: Return
     # --------------------------------------------------------
-
-    test_metrics = evaluate_predictions(
-        std_splits["y_test"],
-        y_test_pred
-    )
-
-
-    # --------------------------------------------------------
-    # Step 11: Validation metrics
-    # --------------------------------------------------------
-
-    val_metrics = evaluate_predictions(
-        std_splits["y_val"],
-        y_val_pred
-    )
-
-
-    # --------------------------------------------------------
-    # Step 12: Return
-    # --------------------------------------------------------
-
     return {
         "theta": theta,
         "y_test": std_splits["y_test"],
