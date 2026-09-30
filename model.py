@@ -48,8 +48,14 @@ def append_column(X, col):
     # TODO: Horizontally append one 1-D feature column onto a design matrix.
     return np.column_stack((X,col))
 
-# Step 6 - one_hot_encode (not yet solved)
-# TODO: implement
+# Step 6 - one_hot_encode
+import numpy as np
+from sklearn.preprocessing import OneHotEncoder
+
+def one_hot_encode(labels):
+    # TODO: Convert a 1-D array of categorical labels into a dense binary one-hot matrix.
+    encoder = OneHotEncoder(sparse_output = False)
+    return encoder.fit_transform(np.asarray(labels).reshape(-1,1))
 
 # Step 7 - fit_standardizer (not yet solved)
 # TODO: implement
