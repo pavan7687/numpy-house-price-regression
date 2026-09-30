@@ -107,13 +107,7 @@ def subset_xy(X, y, indices):
 
 # Step 13 - ols_fit
 def ols_fit(X, y):
-    # TODO: return the ordinary-least-squares weight vector for a linear model.
-    A = X.T @ X
-    b = X.T @ y
-
-    theta = np.linalg.solve(A, b)
-
-    return theta
+    return np.linalg.lstsq(X, y, rcond=None)[0]
 
 # Step 14 - ols_predict
 def ols_predict(X, theta):
@@ -246,6 +240,61 @@ def evaluate_predictions(y_true, y_pred):
         "residual_summary": residual_summary(y_true, y_pred)
     }
 
-# Step 24 - house_price_pipeline (not yet solved)
-# TODO: implement
+# Step 24 - house_price_pipeline
+def house_price_pipeline(X, y, ratio_num_idx, ratio_den_idx, cat_labels=None, seed=0):
+
+    X = impute_nan_with_mean(X)
+
+    lower, upper = compute_iqr_bounds(X)
+    X = clip_columns(X, lower, upper)
+
+    X = assemble_feature_matrix(
+        X,
+        ratio_num_idx,
+        ratio_den_idx,
+        cat_labels
+    )
+
+    splits = make_train_val_test(
+        X,
+        y,
+        0.6,
+        0.2,
+        seed
+    )
+
+    # continue with standardization...
+
+    # 6. Standardize using TRAINING data
+    std_splits, mean, std = standardize_and_add_bias(splits)
+
+    # 7. Fit OLS
+    theta = ols_fit(
+        std_splits["X_train"],
+        std_splits["y_train"]
+    )
+
+    # 8. Predictions
+    y_test_pred = std_splits["X_test"] @ theta
+    y_val_pred = std_splits["X_val"] @ theta
+
+    # 9. Evaluate
+    test_metrics = evaluate_predictions(
+        std_splits["y_test"],
+        y_test_pred
+    )
+
+    val_metrics = evaluate_predictions(
+        std_splits["y_val"],
+        y_val_pred
+    )
+
+    # 10. Return everything required
+    return {
+        "theta": theta,
+        "y_test": std_splits["y_test"],
+        "y_test_pred": y_test_pred,
+        "test_metrics": test_metrics,
+        "val_metrics": val_metrics
+    }
 
